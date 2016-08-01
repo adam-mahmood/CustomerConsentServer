@@ -12,6 +12,8 @@ from flask_restful import Resource, Api
 from flask_restful import reqparse
 from setuptools.command.build_ext import if_dl
 from bcrypt import  hashpw,gensalt, checkpw
+from flask.ext.httpauth import HTTPBasicAuth
+auth = HTTPBasicAuth()
 
 app = Flask(__name__)
 api = Api(app)
@@ -29,21 +31,21 @@ class CreateStaff(Resource):
             parser = reqparse.RequestParser()
             parser.add_argument('surname',type=str,help='Surname of new Staff')
             parser.add_argument('forename',type=str,help='Forename of new Staff')
-            parser.add_argument('email',type=str,help='Email address of Staff')
+            parser.add_argument('email_address',type=str,help='Email address of Staff')
             parser.add_argument('password',type=str,help='Password of Staff')
             parser.add_argument('gender',type=str,help='Gender of new Staff')
             parser.add_argument('dob',type=str,help='DOB of new Staff')
-            parser.add_argument('is_admin',type=bool,help='Is admin of new Staff')
+            parser.add_argument('is_admin',type=str,help='Is admin of new Staff')
             parser.add_argument('phone_number',type=int,help='Phone number of new Staff')
             args = parser.parse_args()
-            _userEmail = args['email']
+            _userEmail = args['email_address']
             _userPassword = args['password']
             _forename = args['forename']
             _surname = args['surname']
             _dob = args['dob']
             _contactNumber = args['phone_number']
             _gender = args['gender']
-            _isAdmin = args['is_admin']
+            _isAdmin = True if args['is_admin'].lower() == "True".lower() else False
             
             try:
                 conn = psycopg2.connect(conn_string)
@@ -52,7 +54,7 @@ class CreateStaff(Resource):
             cursor = conn.cursor()
             _userPassword = hashpw(_userPassword.encode('UTF_8'), gensalt(12))
             print(_userPassword.decode())
-            cursor.callproc("public.create_staff",[_forename,_surname,_userEmail,_userPassword.decode(),_isAdmin,_gender,_dob,_contactNumber])
+            cursor.callproc("public.create_staff3",[_forename,_surname,_userEmail,_userPassword.decode(),_isAdmin,_gender,_dob,_contactNumber])
 
             result = cursor.fetchall()
             conn.commit()
@@ -103,16 +105,21 @@ class CreateCustomer(Resource):
                 print("Unable to connect to the database!")
             print(args)
             cursor = conn.cursor()
-            cursor.callproc("public.create_customer2",[_surname,_forename,_customerEmail,_contactNumber,_address,_city,_country,_post_code,_dob,_gender,_registrationDate])
+            cursor.callproc("public.create_customer5",[_surname,_forename,_customerEmail,_contactNumber,_address,_city,_country,_post_code,_dob,_gender,_registrationDate])
 
             result = cursor.fetchone()
             conn.commit()
-            cursor.close()
             print(result)
+            print(type(result))
             if( result is not None and len(result)> 0):
-                return {'status': 200,'message':'Customer Created Succesfully','result':result}
+                cursor.callproc("public.get_treatments5",[int(result[0])])
+                result2 = cursor.fetchall()
+                conn.commit()
+                cursor.close()
+                return {'status': 200,'message':'Customer Created Succesfully','result':result,'treatments': result2}
             else:
-                return {'status': 100,'message':'Customer Not Created','result':result}
+                cursor.close()
+                return {'status': 100,'message':'Customer Already Exists!','result':result}
             
         except Exception as e:
             return {'error':str(e)}    
@@ -129,17 +136,12 @@ class SearchCustomer(Resource):
             parser.add_argument('customer_id',type=str)
 
             args = parser.parse_args()
-            _customerEmail = args['email_address']
-            _forename = args['forename']
-            _surname = args['surname']
-            _dob = args['date_of_birth']
-            _contactNumber = args['contact_number']
-            _customer_id = args['customer_id']
-            
+
+            print(args)
             filteredArgs = {k: v for k, v in args.items() if v  }
             length = len(filteredArgs)
             index = 0;
-
+            print(filteredArgs)
             whereQuery = [];
             whereQuery.append("WHERE ")
             for key, value in filteredArgs.items():
@@ -149,6 +151,7 @@ class SearchCustomer(Resource):
                 else:
                     whereQuery.append("""{} = '{}' AND """.format(key, value))
                 
+                
             print(whereQuery)
             try:
                 conn = psycopg2.connect(conn_string)
@@ -156,7 +159,9 @@ class SearchCustomer(Resource):
                 print("Unable to connect to the database!")
 
             cursor = conn.cursor()
-            sql = """SELECT "Customer".customer_id,forename,surname,to_char("date_of_birth", 'DD/MM/YYYY'),email_address,address,city,country,phone,sex FROM public."Customer" INNER JOIN public."Emails" ON "Customer".customer_id = "Emails".customer_id INNER JOIN public."Customer_Phones" ON "Customer".customer_id = "Customer_Phones".customer_id {};""".format("".join(whereQuery))
+             
+            #sql = """SELECT "Customer".customer_id,forename,surname,to_char("date_of_birth", 'DD/MM/YYYY'),email_address,address,city,country,phone,sex FROM public."Customer" INNER JOIN public."Emails" ON "Customer".customer_id = "Emails".customer_id INNER JOIN public."Customer_Phones" ON "Customer".customer_id = "Customer_Phones".customer_id {};""".format("".join(whereQuery))
+            sql = """SELECT "Customer".customer_id,"Customer".forename,"Customer".surname,"Customer".sex,"Emails".email_address,"Customer".address,"Customer".city,"Customer".country,"Customer".post_code,to_char("date_of_birth", 'DD/MM/YYYY') AS "date_of_birth","Customer_Phones".phone,to_char("registration_date", 'DD/MM/YYYY') AS "reg_birth" FROM public."Customer" INNER JOIN public."Emails" ON "Customer".customer_id = "Emails".customer_id INNER JOIN public."Customer_Phones" ON "Customer".customer_id = "Customer_Phones".customer_id {};""".format("".join(whereQuery))
             print(sql)
             cursor.execute(sql)
 
@@ -220,7 +225,7 @@ class AuthenticateStaff(Resource):
             except:
                 print("Unable to connect to the database!")
             cursor = conn.cursor()
-            cursor.callproc("public.authenticate_employee7",[_userEmail])
+            cursor.callproc("public.authenticate_employee8",[_userEmail])
 
             result = cursor.fetchone()
  
@@ -263,16 +268,16 @@ class CustomerTreatments(Resource):
     def get(self):
         try:  
             parser = reqparse.RequestParser()
-            parser.add_argument('customer_id',type=str,help='Email address to create user')    
+            parser.add_argument('customer_id',type=int,help='Customer ID to Search For Customer Treatments')    
             args = parser.parse_args()
             _customerId = args['customer_id']  
-                
+            print(type(_customerId))  
             try:
                 conn = psycopg2.connect(conn_string)
             except:
                 print("Unable to connect to the database!")
             cursor = conn.cursor()
-            cursor.callproc("public.get_treatments2",_customerId)
+            cursor.callproc("public.get_treatments5",[_customerId,])
 
             result = cursor.fetchall()
             print(result)
