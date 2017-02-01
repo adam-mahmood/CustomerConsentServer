@@ -13,6 +13,7 @@ from itsdangerous import (TimedJSONWebSignatureSerializer
 import base64
 import io
 from click.types import Path
+import re
 
 
 
@@ -238,7 +239,10 @@ class CreateCustomer(Resource,DatabaseConnection):
             self.connect_to_database()
             print(args)
             cursor = self.conn.cursor()
-            cursor.callproc("public.create_customer5",[_surname,_forename,_customerEmail,_contactNumber,_address,_city,_country,_post_code,_dob,_gender,_registrationDate])
+            if not _dob:
+                _dob="NULL"
+            print(_dob);
+            cursor.callproc("public.create_customer6",[_surname,_forename,_customerEmail,_contactNumber,_address,_city,_country,_post_code,_dob,_gender,_registrationDate])
 
             result = cursor.fetchone()
             self.conn.commit()
@@ -385,7 +389,8 @@ class Upload(Resource,DatabaseConnection):
 
     def convertToImage(self, _customerId, _uploadDate, _signatureImageString):
         imgdata = base64.b64decode(_signatureImageString)
-        filename = Upload.path + _customerId + '_' + _uploadDate.replace('/', '') + Upload.imageType
+        _uploadDate = re.sub('[/:]', '', _uploadDate)
+        filename = Upload.path + _customerId + '_' + _uploadDate.replace(' ', '_') + Upload.imageType
         print(filename)
         with open(filename, 'wb') as f:
             f.write(imgdata)
@@ -593,7 +598,8 @@ class CustomerTreatments(Resource,DatabaseConnection):
                 return {'status':100,'message':'No Treatments'}
             
         except Exception as e:
-            return {'error':str(e)}        
+            return {'error':str(e)}
+
 api.add_resource(CreateStaff, '/api/v1.0/superdrug/createstaff')
 api.add_resource(SearchCustomer, '/api/v1.0/superdrug/searchcustomer')
 api.add_resource(AuthenticateStaff, '/api/v1.0/superdrug/login/authenticatestaff')
