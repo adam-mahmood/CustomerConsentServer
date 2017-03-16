@@ -130,9 +130,10 @@ class CreateStaff(Resource,DatabaseConnection):
             _userPassword = self.hash_password(_userPassword)
             print(_userPassword.decode())
             print(args)
-
-            cursor.callproc("public.create_staff4",[_forename,_surname,_userEmail,_userPassword.decode(),_isAdmin,_gender,_dob,_contactNumber,_username,_address,_city,_post_code,_registrationDate,_branchName])
-
+            try:
+                cursor.callproc("public.create_staff4",[_forename,_surname,_userEmail,_userPassword.decode(),_isAdmin,_gender,_dob,_contactNumber,_username,_address,_city,_post_code,_registrationDate,_branchName])
+            except Exception  as err:
+                print("Error Creating Staff: {0}".format(err))
             result = cursor.fetchall()
             self.conn.commit()
             cursor.close()
@@ -221,14 +222,14 @@ class CreateCustomer(Resource,DatabaseConnection):
             parser.add_argument('registration_date',type=str,help='Registration Date to create new Customer')
             args = parser.parse_args()
             _customerEmail = args['email_address']
-            _forename = args['forename']
-            _surname = args['surname']
+            _forename = args['forename'].lower()
+            _surname = args['surname'].lower()
             _dob = args['dob']
             _contactNumber = args['contact_number']
-            _address = args['address']
-            _city = args['city']
-            _country = args['country']
-            _post_code = args['post_code']
+            _address = args['address'].upper()
+            _city = args['city'].upper()
+            _country = args['country'].upper()
+            _post_code = args['post_code'].upper()
             _gender = args['gender']
             _registrationDate = args['registration_date']
             
@@ -239,15 +240,18 @@ class CreateCustomer(Resource,DatabaseConnection):
             self.connect_to_database()
             print(args)
             cursor = self.conn.cursor()
-            if not _dob:
-                _dob="NULL"
+
             print(_dob);
-            cursor.callproc("public.create_customer6",[_surname,_forename,_customerEmail,_contactNumber,_address,_city,_country,_post_code,_dob,_gender,_registrationDate])
+            try:
+                cursor.callproc("public.create_customer6",
+                                [_surname, _forename, _customerEmail, _contactNumber, _address, _city, _country,
+                                 _post_code, _dob, _gender, _registrationDate])
+            except Exception  as err:
+                print("Error Creating Customer: {0}".format(err))
 
             result = cursor.fetchone()
             self.conn.commit()
-            print(result)
-            print(type(result))
+
             if( result is not None and len(result)> 0):
                 cursor.callproc("public.get_treatments5",[int(result[0])])
                 result2 = cursor.fetchall()
@@ -335,34 +339,28 @@ class EditCustomer(Resource,DatabaseConnection):
             
             print(args)
             filteredArgs = {k: v for k, v in args.items() if v   }
-            print(filteredArgs)
-            if (filteredArgs.__contains__('email_address')):
-                filteredArgs.pop('email_address')
-            elif (filteredArgs.__contains__('contact_number')):
-                
-                filteredArgs.pop('contact_number')
-                
-            length = len(filteredArgs)     
-            index = 0;
-            updateQuery = [];
-            updateQuery.append("""UPDATE "Customer" SET """)
-            for key, value in filteredArgs.items():
-                index = index +1
-                if(index == length):
-                    updateQuery.append("""{} = '{}' """.format(key, value))
-                else:
-                    updateQuery.append("""{} = '{}', """.format(key, value))
-                   
-            print(updateQuery)
-            self.connect_to_database()
+            filteredArgsEmail = {}
+            filteredArgsPhoneNumber = {}
 
-            cursor = self.conn.cursor()
-             
-            #sql = """SELECT "Customer".customer_id,forename,surname,to_char("date_of_birth", 'DD/MM/YYYY'),email_address,address,city,country,phone,sex FROM public."Customer" INNER JOIN public."Emails" ON "Customer".customer_id = "Emails".customer_id INNER JOIN public."Customer_Phones" ON "Customer".customer_id = "Customer_Phones".customer_id {};""".format("".join(updateQuery))
-            sql = """{} WHERE "Customer".customer_id = to_number('{}','99999');""".format("".join(updateQuery),_customerId)
-            print(sql)
-            cursor.execute(sql)
-            self.conn.commit()
+            filteredArgs.pop('customer_id')
+            print(filteredArgs)
+            ##Because Email Adress and Phone number are in seperate tables they need to be seperated into their own dics
+            if (filteredArgs.__contains__('email_address')):
+                filteredArgsEmail['email_address'] = filteredArgs.pop('email_address')
+
+            if (filteredArgs.__contains__('contact_number')):
+                filteredArgsPhoneNumber['phone'] = filteredArgs.pop('contact_number')
+
+            if filteredArgs:
+                cursor = self.update(filteredArgs, _customerId,""" "Customer"  """,""" "Customer".customer_id""")
+
+            if filteredArgsEmail:
+                cursor = self.update(filteredArgsEmail, _customerId,""" "Emails" """,""" "Emails".customer_id""")
+
+            if filteredArgsPhoneNumber:
+                cursor = self.update(filteredArgsPhoneNumber, _customerId,""" "Customer_Phones" """,""" "Customer_Phones".customer_id""")
+
+
             cursor.close()
             result = "success"
             if( result is not None and len(result)> 0):
@@ -371,7 +369,32 @@ class EditCustomer(Resource,DatabaseConnection):
                 return {'status': 100,'message':'Customer Not Changed','result':[]}
             
         except Exception as e:
-            return {'error':str(e)}    
+            return {'error':str(e)}
+
+    def update(self, filteredArgs, _customerId,tableName,custmerIdColumnName):
+        length = len(filteredArgs)
+        index = 0;
+        updateQuery = [];
+        updateQuery.append("""UPDATE {} SET """.format(tableName))
+        for key, value in filteredArgs.items():
+            index = index + 1
+            if (index == length):
+                updateQuery.append("""{} = '{}' """.format(key, value))
+            else:
+                updateQuery.append("""{} = '{}', """.format(key, value))
+        print(updateQuery)
+        self.connect_to_database()
+        cursor = self.conn.cursor()
+        sql = """{} WHERE {} = to_number('{}','99999');""".format("".join(updateQuery),custmerIdColumnName, _customerId)
+        print(sql)
+        try:
+            cursor.execute(sql)
+            self.conn.commit()
+        except Exception  as err:
+            print("Error Editing Customer: {0}".format(err))
+        return cursor
+
+
 class Upload(Resource,DatabaseConnection):
     ##@app.route('/api/v1.0/superdrug/editcustomer', methods=['POST'])
     path = 'resources/customerSignatures/'
